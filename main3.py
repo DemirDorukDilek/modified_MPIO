@@ -1,23 +1,31 @@
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 import numpy as np
 
-@dataclass
 class UAV_state:
     """UAV state representation"""
-    id: int = 0
-    xy: np.ndarray = np.zeros((2,))
-    h: float = 50.0
-    Vxy: float = 10.0
-    psi: float = 0.0
-    lambda_: float = 0.0
+    def __init__(self):
+        self.id= 0
+        self.xyz= np.zeros((3,))
+
+        self.Vxy= 10.0
+        self.psi= 0.0
+        self.lambda_= 0.0
+
+    @property
+    def xy(self):
+        return self.xyz[:2]
+    
+    @property
+    def h(self):
+        return self.xyz[2]
 
 @dataclass
 class Obstacle:
     """Obstacle representation"""
     xy: np.ndarray = np.zeros((2,))
-    radius: float
+    radius: float = 5.0
     height: float = 100.0
 
 class UAV_model:
@@ -81,7 +89,7 @@ class FlockingModel:
             dist = np.linalg.norm(uav_state.xy-neighbor.xy)
             if dist <= self.Rcomm_1:
                 force_f += weights[neighbor.id]*(neighbor.xy - uav_state.xy)*(1 - np.power(self.R_desire/dist,2))
-                force_a_vn += weights[neighbor.id] * neighbor.xy - neighbor.yy
+                force_a_vn += weights[neighbor.id] * neighbor.xy - neighbor.xy
 
             
             if dist <= self.Rlim_1:
@@ -119,29 +127,12 @@ class ObstacleAvoidanceModel:
 
                 temp = ind1.xy+ind2.xy-2*uav_state.xy
                 unit_vo = temp/np.linalg.norm(temp)
-                vo = np.linalg.norm(ve)*unit_vo
-
-
-    # def get_A0(self, uav_state: UAV_state, obstacles: List[Obstacle], ve: np.ndarray):
-
-    #     yaw_ve = np.arctan2(ve[1],ve[0])
-
-    #     attention = []
-
-    #     for obstacle in obstacles:
-
-    #         obstacle_rel_vec = obstacle.xy - uav_state.xy
-    #         dist = np.linalg.norm(obstacle_rel_vec)
-    #         yaw_obstacle = np.arctan2(obstacle_rel_vec[1],obstacle_rel_vec[0])
-
-    #         angle_diff = abs(yaw_obstacle - yaw_ve)
-    #         while angle_diff > np.pi: angle_diff -= 2*np.pi
-    #         if dist < self.R2_comm + obstacle.radius + self.R2_lim and abs(angle_diff) < self.theta_lim:
-    #             attention.append(obstacle)
+                vo = np.linalg.norm(ve)*unit_vo # weight eklenebilir
         
-    #     return attention
-    
-    def get_A0(self, uav_state: UAV_state, obstacles: List[Obstacle], ve: np.ndarray) -> List[List[Obstacle],List[float],List[float]]:
+        return vo
+
+
+    def get_A0(self, uav_state: UAV_state, obstacles: List[Obstacle], ve: np.ndarray) -> Tuple[List[Obstacle],List[float],List[float]]:
 
         def get_p(A,B,r):
             dist = np.linalg.norm(A-B)
@@ -200,7 +191,7 @@ class ObstacleAvoidanceModel:
         
         return nearest_idx
     
-    def get_Ind_2(self, uav_state: UAV_state, ind1_idx:int , obstacles: List[Obstacle], yaws:List[float]) -> List[int,int,int]:
+    def get_Ind_2(self, uav_state: UAV_state, ind1_idx:int , obstacles: List[Obstacle], yaws:List[float]) -> List[int]:
         
         max_gap = -1*float('inf')
         idx = 0
@@ -229,4 +220,329 @@ class ObstacleAvoidanceModel:
             
 
     
+class Cost:
+
+    def __init__(self,f1=1.0,f2=1.0,R_desire=10.0,R1_lim=2.0,R2_lim=2.0):
+        self.f1 = f1
+        self.f2 = f2
+        self.R_desire = R_desire
+        self.R1_lim = R1_lim
+        self.R2_lim = R2_lim
+
+    def cost1(self, uav_state: UAV_state, ve: np.ndarray, attention: List[Obstacle]):
         
+        if len(attention) == 0:
+            cost1 = np.abs(uav_state.Vxy[0] - ve[0]) + np.abs(uav_state.Vxy[1] - ve[1])
+        else:
+            cost1 = uav_state.xy.dot(ve)/np.linalg.norm(ve)
+    
+    def cost2(self, uav_state: UAV_state, neighbors: List[UAV_state]):
+
+        cost2 = 0
+        for neighbor in neighbors:
+            dist = np.linalg.norm(uav_state.xy-neighbor.xy)
+            cost2 += self.f1 * np.abs(self.R_desire - dist) + self.f2 * (np.abs(neighbor.Vxy[0] - uav_state.Vxy[0]) + np.abs(neighbor.Vxy[1] - uav_state.Vxy[1]))
+        
+        return cost2
+    
+    def cost3(self, uav_state: UAV_state, obstacles: List[Obstacle]):
+
+        for obstacle in obstacles:
+            if np.linalg.norm(uav_state.xy-obstacle.xy) <= self.R2_lim + obstacle.radius:
+                return 1
+        return 0
+    
+    def cost4(self, uav_state: UAV_state, neighbors: List[UAV_state]):
+
+        for neighbor in neighbors:
+            if np.linalg.norm(uav_state.xy-neighbor.xy) <= self.R1_lim:
+                return 1
+        return 0
+
+
+class MMPIO:
+
+    def __init__(self):
+        self.N = 58
+        self.Nc_max_3 = 20
+        self.Nd = 2
+        self.Xu= 1
+        self.Xl= 0
+        self.Vu= 0.05
+        self.Vl= -0.05
+        self.R = 0.3
+        self.ft = 3
+        self.pl = 0.9
+        self.e = 2
+        self.sl = 20
+    
+    def run(self,objectives_func, dimension):
+        positions = np.random.uniform(self.Xl, self.Xu, (self.N, dimension))
+        velocities = np.random.uniform(self.Vl, self.Vu, (self.N, dimension))
+        Nc = 1
+
+        archive = []
+
+        current_n = self.N
+
+        while Nc <= self.Nc_max_3:
+            objectives = [objectives_func(position) for position in positions]
+            
+            indexs, ranks, crowding_distences = NSGA2Sorter.nsga2_sort(objectives)
+            fronts_idx = [i for i in range(len(ranks)) if ranks[i] == 1]
+
+            Xcenter = positions[fronts_idx].mean(axis=0)
+
+            archive.extend([positions[i] for i in fronts_idx])
+            if archive:
+                archive_objectives = [objectives_func(pos) for pos in archive]
+                archive_ranks = self._pareto_sorting(archive_objectives)
+                archive = [pos for pos, rank in zip(archive, archive_ranks) if rank == 1]
+
+            Xg = np.random.choice(archive)
+            
+            Nc+=1
+            new_positions = np.copy(positions)
+            new_velocities = np.copy(velocities)
+            
+            i = 1
+            while i <= current_n:
+
+                if ranks[indexs.index(i)] <= np.ceil(self.pl*current_n):
+                    dummy_log = np.log(Nc)/np.log(self.Nc_max_3)
+                    new_velocities[i] = np.exp(-self.R*Nc)*velocities[i]+np.random.random()*self.ft*(1-dummy_log)*(Xg-positions[i]) + np.random.random()*self.ft*dummy_log*(Xcenter-positions[i])
+                    new_positions[i] = positions[i] + np.clip(new_velocities[i],self.Vl,self.Vu)
+                else:
+                    k = 1
+                    while k <= self.sl:
+                        valid_pigeons = [j for j in range(current_n) if ranks[j] < ranks[i]]
+                        if valid_pigeons:
+                            dim = np.ceil(np.random.random()*dimension)
+                            new_positions[i][dim] = np.clip(positions[np.random.choice(valid_pigeons)][dim]+ self.e*np.random.random(),self.Xl,self.Xu)
+                        k+=1
+                
+                new_objective = objectives_func(new_positions[i])
+
+                if NSGA2Sorter._dominates(objectives[i],new_objective):
+                    new_positions[i] = positions[i]
+                i+=1
+            
+            if Nc <= self.Nc_max_3:
+                to_remove = sorted(range(current_n), key=lambda x: ranks[x], reverse=True)[:min(self.Nd, current_n)]
+                positions = np.delete(positions, to_remove, axis=0)
+                velocities = np.delete(velocities, to_remove, axis=0)
+                current_pop_size -= len(to_remove)
+            
+            # Return Pareto front
+        if len(positions) == 0:
+            return np.random.rand(dimension), []
+            
+        final_objectives = []
+        for i in range(len(positions)):
+            try:
+                obj = objectives_func(positions[i])
+                final_objectives.append(obj)
+            except Exception:
+                final_objectives.append([1000.0, 1000.0])
+        
+        final_ranks = self._pareto_sorting(final_objectives)
+        pareto_front = [positions[i] for i, rank in enumerate(final_ranks) if rank == 1]
+
+
+
+        if pareto_front:
+            # Select solution with minimum Cost2 (Equation 24)
+            best_idx = 0
+            min_cost2 = float('inf')
+            for i, pos in enumerate(pareto_front):
+                try:
+                    obj = objectives_func(pos)
+                    if len(obj) > 1 and obj[1] < min_cost2:
+                        min_cost2 = obj[1]
+                        best_idx = i
+                except Exception:
+                    continue
+            return pareto_front[best_idx], final_objectives
+        else:
+            return positions[0], final_objectives
+
+
+
+
+
+
+class FlockingControlAlgorithm:
+
+    def __init__(self, num_pigeons):
+        pass
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+class NSGA2Sorter:
+    @staticmethod
+    def _pareto_sorting(objectives: List[List[float]]) -> List[int]:
+        """Pareto ranking of solutions (sizin kodunuz)"""
+        n = len(objectives)
+        ranks = [0] * n
+        domination_count = [0] * n
+        dominated_solutions = [[] for _ in range(n)]
+       
+        # Find domination relationships
+        for i in range(n):
+            for j in range(n):
+                if i != j:
+                    if NSGA2Sorter._dominates(objectives[i], objectives[j]):
+                        dominated_solutions[i].append(j)
+                    elif NSGA2Sorter._dominates(objectives[j], objectives[i]):
+                        domination_count[i] += 1
+       
+        # Assign ranks
+        current_front = []
+        for i in range(n):
+            if domination_count[i] == 0:
+                ranks[i] = 1
+                current_front.append(i)
+       
+        rank = 1
+        while current_front:
+            next_front = []
+            for i in current_front:
+                for j in dominated_solutions[i]:
+                    domination_count[j] -= 1
+                    if domination_count[j] == 0:
+                        ranks[j] = rank + 1
+                        next_front.append(j)
+            current_front = next_front
+            rank += 1
+       
+        return ranks
+   
+    @staticmethod
+    def _dominates(obj1: List[float], obj2: List[float]) -> bool:
+        """Check if obj1 dominates obj2 (for minimization) (sizin kodunuz)"""
+        better_in_any = False
+        for i in range(len(obj1)):
+            if obj1[i] > obj2[i]:
+                return False
+            elif obj1[i] < obj2[i]:
+                better_in_any = True
+        return better_in_any
+    
+    # EKSİK OLAN KISI: CROWDING DISTANCE
+    @staticmethod
+    def _calculate_crowding_distance(objectives: List[List[float]], 
+                                   front_indices: List[int]) -> List[float]:
+        """Calculate crowding distance for solutions in the same front"""
+        n = len(front_indices)
+        if n <= 2:
+            return [float('inf')] * n
+        
+        distances = [0.0] * n
+        n_objectives = len(objectives[0])
+        
+        for obj_idx in range(n_objectives):
+            # Sort by this objective
+            sorted_indices = sorted(range(n), 
+                                  key=lambda i: objectives[front_indices[i]][obj_idx])
+            
+            # Boundary solutions get infinite distance
+            distances[sorted_indices[0]] = float('inf')
+            distances[sorted_indices[-1]] = float('inf')
+            
+            # Calculate objective range
+            obj_min = objectives[front_indices[sorted_indices[0]]][obj_idx]
+            obj_max = objectives[front_indices[sorted_indices[-1]]][obj_idx]
+            obj_range = obj_max - obj_min
+            
+            if obj_range > 0:
+                for i in range(1, n - 1):
+                    idx = sorted_indices[i]
+                    prev_idx = sorted_indices[i - 1]
+                    next_idx = sorted_indices[i + 1]
+                    
+                    prev_val = objectives[front_indices[prev_idx]][obj_idx]
+                    next_val = objectives[front_indices[next_idx]][obj_idx]
+                    
+                    distances[idx] += (next_val - prev_val) / obj_range
+        
+        return distances
+    
+    @staticmethod
+    def _get_fronts(objectives: List[List[float]], 
+                   ranks: List[int]) -> List[List[int]]:
+        """Group solutions by their Pareto rank"""
+        max_rank = max(ranks)
+        fronts = [[] for _ in range(max_rank)]
+        
+        for i, rank in enumerate(ranks):
+            fronts[rank - 1].append(i)
+        
+        return fronts
+    
+    # TAM NSGA-II SORTING
+    @staticmethod
+    def nsga2_sort(objectives: List[List[float]]) -> List[Tuple[int, int, float]]:
+        """
+        Complete NSGA-II sorting
+        
+        Returns:
+            List of (solution_index, rank, crowding_distance) sorted by NSGA-II criteria
+        """
+        ranks = NSGA2Sorter._pareto_sorting(objectives)
+        
+        fronts = NSGA2Sorter._get_fronts(objectives, ranks)
+        
+        idxs,ranks,dists = [],[],[]
+        
+        for front_idx, front in enumerate(fronts):
+            if not front:
+                continue
+                
+            # Calculate crowding distance for this front
+            distances = NSGA2Sorter._calculate_crowding_distance(objectives, front)
+            
+            # Create result tuples
+            for i, sol_idx in enumerate(front):
+                rank = front_idx + 1
+                crowding_dist = distances[i]
+                idxs.append(sol_idx)
+                ranks.append(rank)
+                dists.append(crowding_dist)
+
+        return idxs,ranks,dists
