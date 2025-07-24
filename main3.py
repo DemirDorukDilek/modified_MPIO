@@ -96,7 +96,7 @@ class FlockingModel:
                 force_c += np.power(1/np.abs(uav_state.xy-neighbor.xy) - 1 / self.Rlim_1,2) * uav_state.x-neighbor.xy / np.abs(uav_state.xy-neighbor.xy)
 
         xy_force = self.Kf * force_f + self.Kc * force_c + self.Ka_vn * force_a_vn
-        h_force = self.Ka_he * (he - uav_state.h) + self.Kv_e * (ve - uav_state.lambda_)
+        h_force = self.Ka_he * (he - uav_state.h) + self.Kv_e * (ve[2] - uav_state.lambda_)
         
         return np.array([xy_force[0],xy_force[1],h_force])
         
@@ -109,6 +109,8 @@ class ObstacleAvoidanceModel:
         self.theta_lim = theta_lim
     
     def calculate_force(self, uav_state: UAV_state, obstacles: List[Obstacle], ve: np.ndarray):
+
+        ve = ve[:2]
 
         attention,tangets,yaws = self.get_A0(uav_state, obstacles, ve)
 
@@ -374,8 +376,49 @@ class MMPIO:
 class FlockingControlAlgorithm:
 
     def __init__(self, num_pigeons):
-        pass
+        
+        initial_positions = [
+            (14.6929, 107.3676, 68.1682),
+            (21.2809, 116.6406, 34.8423),
+            (20.3911, 113.6529, 24.6351),
+            (3.5699, 108.9509, 96.377),
+            (10.2116, 111.558, 30.1431)
+        ]
 
+        initial_positions2 = [
+            (120, 75),
+            (120, 155),
+            (240, 75),
+            (240, 155),
+            (350, 40),
+            (350, 180),
+            (360, 110),
+        ]
+
+        self.uavs = [UAV_state(id=i,xyz=np.array([x,y,h]),Vxy=10.0,psi=0.0,lambda_=0.0) for i,(x,y,h) in enumerate(initial_positions)]
+        self.obstacles = [Obstacle(xy = pos, radius=5 , height=100) for pos in initial_positions2]
+
+        # models
+        self.uav_model = UAV_model()
+        self.flocking_model = FlockingModel()
+        self.obstacle_avoidance_model = ObstacleAvoidanceModel()
+        self.cost_functions = Cost()
+        self.mmpio = MMPIO()
+
+        self.ve = np.array([10.0,0.0,0.0])
+        self.he = 50.0
+
+    def simulate(self):
+        i = 1
+
+        for uav in self.uavs:
+            vf_dot = self.flocking_model.calculate_acc(uav,[u for u in self.uavs if u != uav],[],self.ve,self.he)
+            vo = self.obstacle_avoidance_model.calculate_force(uav,self.obstacles,self.ve)
+
+            def objective_func():
+
+
+            self.mmpio.run()
 
 
 
