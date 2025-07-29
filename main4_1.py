@@ -772,7 +772,7 @@ class FlockingControlAlgorithm:
                 Vxy_c = self.uav_model.tau_v*(u[0]*np.cos(uav.psi)+u[1]*np.sin(uav.psi)) + uav.Vxy
                 psi_c = self.uav_model.tau_psi/uav.Vxy*(u[1]*np.cos(uav.psi)-u[0]*np.sin(uav.psi)) + uav.psi
                 h_c = uav.h + self.uav_model.tau_h/self.uav_model.tau_lambda*uav.lambda_+self.uav_model.tau_h*u[2]
-                # h_c = self.he
+                # h_c = self.he # TODO daha iyi sonuc veriyor
 
                 dummy = np.linalg.norm(self.ve[:2])
                 if np.abs(Vxy_c-dummy) < self.Vxy_c_lim: Vxy_c = dummy
