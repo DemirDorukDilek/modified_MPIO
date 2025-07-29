@@ -386,14 +386,13 @@ class ObstacleAvoidanceModel:
 
 class FlockingModel:
 
-    def __init__(self, R1_comm = 20.0, Rlim_1 = 2.0 , R_desire = 10.0, Kf = 0.1, Kc = 100_000.0 , Ka_vn = 0.1, Kfoc = 0.1, Ka_he = 30.0 , Kv_e = 10.0 ):
+    def __init__(self, R1_comm = 20.0, Rlim_1 = 2.0 , R_desire = 15.0, Kf = 0.1, Kc = 100_000.0 , Ka_vn = 0.1, Ka_he = 30.0 , Kv_e = 10.0 ):
         self.Rcomm_1 = R1_comm
         self.Rlim_1 = Rlim_1
         self.R_desire = R_desire
         self.Kf = Kf
         self.Kc = Kc
         self.Ka_vn = Ka_vn
-        self.Kfoc = Kfoc # flocking obstacle correction
         self.Ka_he = Ka_he
         self.Kv_e = Kv_e
     
@@ -402,7 +401,6 @@ class FlockingModel:
         force_f = np.zeros((2,))
         force_c = np.zeros((2,))
         force_a_vn = np.zeros((2,))
-        force_foc = np.zeros((2,))
         ve90 = np.matmul(np.array([[0,-1],[1,0]]),ve[:2])
         stg = np.linalg.norm(ve90)
         for idx,o_uav in enumerate(uavs):
@@ -410,19 +408,22 @@ class FlockingModel:
             rel_P = o_uav.xy - uav.xy # relative postion vector
             dist = np.linalg.norm(rel_P)
             if dist <= self.Rcomm_1:
-                force_f += weights[idx]*(rel_P)*(1 - np.power(self.R_desire/dist,2))
-                force_a_vn += weights[idx] * o_uav.vec_Vxy - uav.vec_Vxy
-                if len(model.get_A0(o_uav,system.obstacles,ve)[0]) == 1:
-                    temp_o_force = model.calculate_force(o_uav,system.obstacles,ve,system.w[idx][idx]).dot(ve90)/np.power(stg,2)*ve90
-                    temp_force = model.calculate_force(uav,system.obstacles,ve,system.w[system.uavs.index(uav)][system.uavs.index(uav)]).dot(ve90)/np.power(stg,2)*ve90
+                a,b,c = 0,0,0
+                a += weights[idx]*(rel_P)*(1 - np.power(self.R_desire/dist,2))
+                a0,t,y = model.get_A0(o_uav,system.obstacles,ve)
+                if len(a0) == 1:
+                    b += model.calculate_force(o_uav,system.obstacles,ve,system.w[idx][idx]).dot(ve90)/np.power(stg,2)*ve90
+                    c += model.calculate_force(uav,system.obstacles,ve,system.w[system.uavs.index(uav)][system.uavs.index(uav)]).dot(ve90)/np.power(stg,2)*ve90
                     if uav.debug == 1:
-                        print("push",system.uavs.index(uav)+1,idx,temp_o_force,temp_force)
-                    force_foc += temp_force + temp_o_force
+                        print("push",system.uavs.index(uav)+1,idx,a,b,c)
+                force_f += a+b+c
+                force_a_vn += weights[idx] * o_uav.vec_Vxy - uav.vec_Vxy
+
             
             if dist <= self.Rlim_1:
                 force_c += np.power(1/np.abs(rel_P) - 1/self.Rlim_1,2) * -rel_P / np.abs(rel_P)
 
-        xy_force = self.Kf * force_f + self.Kc * force_c + self.Ka_vn * force_a_vn + self.Kfoc * force_foc
+        xy_force = self.Kf * force_f + self.Kc * force_c + self.Ka_vn * force_a_vn
         h_force = self.Ka_he * (he - uav.h) + self.Kv_e * (ve[2] - uav.lambda_)
         if uav.debug == 1:
             print(system.uavs.index(uav)+1,model.calculate_force(o_uav,system.obstacles,ve,system.w[idx][idx]).dot(rel_P)/dist/dist*-rel_P)
@@ -772,7 +773,6 @@ class FlockingControlAlgorithm:
                 Vxy_c = self.uav_model.tau_v*(u[0]*np.cos(uav.psi)+u[1]*np.sin(uav.psi)) + uav.Vxy
                 psi_c = self.uav_model.tau_psi/uav.Vxy*(u[1]*np.cos(uav.psi)-u[0]*np.sin(uav.psi)) + uav.psi
                 h_c = uav.h + self.uav_model.tau_h/self.uav_model.tau_lambda*uav.lambda_+self.uav_model.tau_h*u[2]
-                # h_c = self.he
 
                 dummy = np.linalg.norm(self.ve[:2])
                 if np.abs(Vxy_c-dummy) < self.Vxy_c_lim: Vxy_c = dummy

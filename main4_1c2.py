@@ -234,6 +234,40 @@ class UAV_model:
         new_state.debug = uav.debug
         return new_state
 
+class FlockingModel:
+
+    def __init__(self, R1_comm = 20.0, Rlim_1 = 2.0 , R_desire = 10.0, Kf = 0.1, Kc = 100_000.0 , Ka_vn = 0.1, Ka_he = 30.0 , Kv_e = 10.0 ):
+        self.Rcomm_1 = R1_comm
+        self.Rlim_1 = Rlim_1
+        self.R_desire = R_desire
+        self.Kf = Kf
+        self.Kc = Kc
+        self.Ka_vn = Ka_vn
+        self.Ka_he = Ka_he
+        self.Kv_e = Kv_e
+    
+    def calculate_acc(self, uav: UAV, uavs: List[UAV], weights: Dict[int,float], ve: np.ndarray, he: float):
+        
+        force_f = np.zeros((2,))
+        force_c = np.zeros((2,))
+        force_a_vn = np.zeros((2,))
+        for idx,o_uav in enumerate(uavs):
+            if uav is o_uav: continue
+            rel_P = o_uav.xy - uav.xy # relative postion vector
+            dist = np.linalg.norm(rel_P)
+            if dist <= self.Rcomm_1:
+                force_f += weights[idx]*(rel_P)*(1 - np.power(self.R_desire/dist,2))
+                force_a_vn += weights[idx] * o_uav.vec_Vxy - uav.vec_Vxy
+
+            
+            if dist <= self.Rlim_1:
+                force_c += np.power(1/np.abs(rel_P) - 1/self.Rlim_1,2) * -rel_P / np.abs(rel_P)
+
+        xy_force = self.Kf * force_f + self.Kc * force_c + self.Ka_vn * force_a_vn
+        h_force = self.Ka_he * (he - uav.h) + self.Kv_e * (ve[2] - uav.lambda_)
+        
+        return np.array([xy_force[0],xy_force[1],h_force])
+        
 
 class ObstacleAvoidanceModel:
 
@@ -248,8 +282,8 @@ class ObstacleAvoidanceModel:
 
         attention,tangets,yaws = self.get_A0(uav, obstacles, ve)
 
-        if system.uavs.index(uav) == 1:
-            print([obstacles.index(x)+1 for x in attention])
+        if uav.debug == 1:
+            # print([obstacles.index(x)+1 for x in attention])
             self.gp.clear()    
         
 
@@ -297,20 +331,15 @@ class ObstacleAvoidanceModel:
     def get_A0(self, uav: UAV, obstacles: List[Obstacle], ve: np.ndarray) -> Tuple[List[Obstacle],List[float],List[float]]:
 
         def get_p(A,B,r):
-            r+=1
-            vec = B - A
-            mag = np.linalg.norm(vec)
-            if r<=mag:
-                sin = np.clip(r/mag,-1,1)
-                cos = np.sqrt(1-np.power(sin,2))
-                t1 = np.matmul(np.array([[cos,-sin],[sin,cos]]),vec)
-                t2 = np.matmul(np.array([[cos,sin],[-sin,cos]]),vec)
-                t1 = t1/np.linalg.norm(t1)*np.sqrt(np.power(mag,2)-np.power(r,2))
-                t2 = t2/np.linalg.norm(t2)*np.sqrt(np.power(mag,2)-np.power(r,2))
-            else:
-                t1 = vec + vec/mag*r
-                t2 = vec - vec/mag*r
-            return t1,t2
+            dist = np.linalg.norm(A-B)
+            th = np.arccos(r / dist)
+            d = np.arctan2(A[1] - B[1], A[0] - B[0])
+            d1 = d + th
+            d2 = d - th
+
+            T1 = r*np.array([np.cos(d1),np.sin(d1)]) + B - A
+            T2 = r*np.array([np.cos(d2),np.sin(d2)]) + B - A
+            return T1,T2
 
         yaw_ve = np.arctan2(ve[1],ve[0])
 
@@ -383,52 +412,7 @@ class ObstacleAvoidanceModel:
 
         return midx
 
-
-class FlockingModel:
-
-    def __init__(self, R1_comm = 20.0, Rlim_1 = 2.0 , R_desire = 10.0, Kf = 0.1, Kc = 100_000.0 , Ka_vn = 0.1, Kfoc = 0.1, Ka_he = 30.0 , Kv_e = 10.0 ):
-        self.Rcomm_1 = R1_comm
-        self.Rlim_1 = Rlim_1
-        self.R_desire = R_desire
-        self.Kf = Kf
-        self.Kc = Kc
-        self.Ka_vn = Ka_vn
-        self.Kfoc = Kfoc # flocking obstacle correction
-        self.Ka_he = Ka_he
-        self.Kv_e = Kv_e
     
-    def calculate_acc(self, uav: UAV, uavs: List[UAV], weights: Dict[int,float], ve: np.ndarray, he: float, model:ObstacleAvoidanceModel):
-        
-        force_f = np.zeros((2,))
-        force_c = np.zeros((2,))
-        force_a_vn = np.zeros((2,))
-        force_foc = np.zeros((2,))
-        ve90 = np.matmul(np.array([[0,-1],[1,0]]),ve[:2])
-        stg = np.linalg.norm(ve90)
-        for idx,o_uav in enumerate(uavs):
-            if uav is o_uav: continue
-            rel_P = o_uav.xy - uav.xy # relative postion vector
-            dist = np.linalg.norm(rel_P)
-            if dist <= self.Rcomm_1:
-                force_f += weights[idx]*(rel_P)*(1 - np.power(self.R_desire/dist,2))
-                force_a_vn += weights[idx] * o_uav.vec_Vxy - uav.vec_Vxy
-                if len(model.get_A0(o_uav,system.obstacles,ve)[0]) == 1:
-                    temp_o_force = model.calculate_force(o_uav,system.obstacles,ve,system.w[idx][idx]).dot(ve90)/np.power(stg,2)*ve90
-                    temp_force = model.calculate_force(uav,system.obstacles,ve,system.w[system.uavs.index(uav)][system.uavs.index(uav)]).dot(ve90)/np.power(stg,2)*ve90
-                    if uav.debug == 1:
-                        print("push",system.uavs.index(uav)+1,idx,temp_o_force,temp_force)
-                    force_foc += temp_force + temp_o_force
-            
-            if dist <= self.Rlim_1:
-                force_c += np.power(1/np.abs(rel_P) - 1/self.Rlim_1,2) * -rel_P / np.abs(rel_P)
-
-        xy_force = self.Kf * force_f + self.Kc * force_c + self.Ka_vn * force_a_vn + self.Kfoc * force_foc
-        h_force = self.Ka_he * (he - uav.h) + self.Kv_e * (ve[2] - uav.lambda_)
-        if uav.debug == 1:
-            print(system.uavs.index(uav)+1,model.calculate_force(o_uav,system.obstacles,ve,system.w[idx][idx]).dot(rel_P)/dist/dist*-rel_P)
-        return np.array([xy_force[0],xy_force[1],h_force])
-
-
 class Cost:
 
     def __init__(self,R_desire,R1_lim,R2_lim,f1=1.0,f2=1.0):
@@ -616,7 +600,6 @@ class FlockingControlAlgorithm:
         self.obstacles = [Obstacle(xy = np.array([pos[0],pos[1]]), radius=5 , height=100) for pos in initial_positions2]
 
         self.uavs[1].debug = 1
-        self.uavs[2].debug = 1
 
         # models
         self.uav_model = UAV_model()
@@ -666,14 +649,12 @@ class FlockingControlAlgorithm:
                      for i in range(self.num_pigeons)}
         cost_history = {'cost1': [], 'cost2': [], 'cost3': [], 'cost4': []}
         for t in np.arange(0,self.Tmax,self.dt):
-            print()
             vf_dots = [] # Store flocking forces for rendering
             vos = [] # Store obstacle avoidance forces for rendering
             
-            nuavs = []
             for idx,uav in enumerate(self.uavs):
+                vf_dot = self.flocking_model.calculate_acc(uav,self.uavs,self.w[idx],self.ve,self.he)
                 vo = self.obstacle_avoidance_model.calculate_force(uav,self.obstacles,self.ve,self.w[idx][idx])
-                vf_dot = self.flocking_model.calculate_acc(uav,self.uavs,self.w[idx],self.ve,self.he,self.obstacle_avoidance_model)
                 vf_dots.append(vf_dot)
                 if uav.debug == 1:
                     self.obstacle_avoidance_model.gp.append((vo,))
@@ -772,7 +753,6 @@ class FlockingControlAlgorithm:
                 Vxy_c = self.uav_model.tau_v*(u[0]*np.cos(uav.psi)+u[1]*np.sin(uav.psi)) + uav.Vxy
                 psi_c = self.uav_model.tau_psi/uav.Vxy*(u[1]*np.cos(uav.psi)-u[0]*np.sin(uav.psi)) + uav.psi
                 h_c = uav.h + self.uav_model.tau_h/self.uav_model.tau_lambda*uav.lambda_+self.uav_model.tau_h*u[2]
-                # h_c = self.he
 
                 dummy = np.linalg.norm(self.ve[:2])
                 if np.abs(Vxy_c-dummy) < self.Vxy_c_lim: Vxy_c = dummy
@@ -780,15 +760,15 @@ class FlockingControlAlgorithm:
                 if np.abs(psi_c - dummy) < self.psi_c_lim: psi_c = dummy
 
                 new_uav = self.uav_model.update_state(uav,{"Vxy_c":Vxy_c,"psi_c":psi_c,"h_c":h_c},self.dt)
-                nuavs.append(new_uav)
+                self.uavs[idx] = new_uav
 
-                trajectory[idx]['x'].append(nuavs[idx].x)
-                trajectory[idx]['y'].append(nuavs[idx].y)
-                trajectory[idx]['h'].append(nuavs[idx].h)
-                trajectory[idx]['vxy'].append(nuavs[idx].Vxy)
-                trajectory[idx]['psi'].append(nuavs[idx].psi)
-                trajectory[idx]['lambda'].append(nuavs[idx].lambda_)
-            self.uavs = nuavs
+                trajectory[idx]['x'].append(self.uavs[idx].x)
+                trajectory[idx]['y'].append(self.uavs[idx].y)
+                trajectory[idx]['h'].append(self.uavs[idx].h)
+                trajectory[idx]['vxy'].append(self.uavs[idx].Vxy)
+                trajectory[idx]['psi'].append(self.uavs[idx].psi)
+                trajectory[idx]['lambda'].append(self.uavs[idx].lambda_)
+
 
             # Calculate and store cost functions
             total_costs = [0.0, 0.0, 0.0, 0.0]
@@ -821,6 +801,7 @@ class FlockingControlAlgorithm:
             # Render every few steps to avoid too frequent updates
             if int(t/self.dt) % 1 == 0: # Render every 2 steps
                 self.render_frame(t, vf_dots, vos)
+
             if t % 10 == 0:
                 print(f"Time: {t:.1f}s, Costs: {[f'{c:.2f}' for c in total_costs]}")
 
@@ -960,14 +941,14 @@ class FlockingControlAlgorithm:
                         fontsize=8, weight='bold')
         
         # Draw UAVs and their vectors
-        for i, uav in enumerate([*self.uavs[:]],start=0):
+        for i, uav in enumerate([self.uavs[1]],start=1):
             color = colors[i % len(colors)]
             
             # UAV position (circle)
             uav_circle = plt.Circle((uav.x, uav.y), 3, 
                                   fill=True, color=color, alpha=0.7)
             
-            if uav.debug == 2:
+            if uav.debug == 1:
                 clr = ["green","blue"]
                 for l,tt in enumerate(self.obstacle_avoidance_model.gp[1:]):
                     if l == self.obstacles.index(self.obstacle_avoidance_model.gp[0]):
