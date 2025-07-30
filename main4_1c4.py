@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 
 
 import numpy as np
-from main import ModifiedMPIO
+
 
 
 
@@ -290,20 +290,17 @@ class ObstacleAvoidanceModel:
         
         proj_mag = vo.dot(ve)/ve_mag
         if uav.debug == 1:
-            pass
-            # print(np.linalg.norm(vo))
+            print(np.linalg.norm(vo))
         if proj_mag <= 0: #ignore
             vo = ve.copy()
             if uav.debug == 1:
-                pass
-                # print("reset")
+                print("reset")
         # elif proj_mag <= ve_mag:
         #     factor = np.exp(proj_mag-ve_mag)
         #     vo = vo*factor
         #     if uav.debug == 1:
         #         print("weakness",factor)
-        # if uav.debug:
-        #     print(weight,ve_mag)
+        
         return vo
 
 
@@ -559,7 +556,6 @@ class MMPIO:
             
             if Nc <= self.Nc_max_3:
                 to_remove = sorted(range(current_n), key=lambda x: ranks[x], reverse=True)[:min(self.Nd, current_n)]
-                to_remove = to_remove[:min(self.Nd, current_pop_size - 1)]
                 positions = np.delete(positions, to_remove, axis=0)
                 velocities = np.delete(velocities, to_remove, axis=0)
                 current_pop_size -= len(to_remove)
@@ -663,17 +659,17 @@ class FlockingControlAlgorithm:
             self.ax.set_aspect('equal')
             self.ax.grid(True)
 
-            # self.axs = []
-            # self.figs = []
-            # for i in range(self.num_pigeons):
-            #     fig, ax = plt.subplots(figsize=(12, 8))
-            #     ax.set_xlim(-50, 450)
-            #     ax.set_ylim(-50, 250)
-            #     ax.set_aspect('equal')
-            #     ax.grid(True)
-            #     self.axs.append(ax)
-            #     self.figs.append(fig)
-            #     del ax
+            self.axs = []
+            self.figs = []
+            for i in range(self.num_pigeons):
+                fig, ax = plt.subplots(figsize=(12, 8))
+                ax.set_xlim(-50, 450)
+                ax.set_ylim(-50, 250)
+                ax.set_aspect('equal')
+                ax.grid(True)
+                self.axs.append(ax)
+                self.figs.append(fig)
+                del ax
             shutil.rmtree("plt/all");os.mkdir("plt/all")
             shutil.rmtree("plt/1");os.mkdir("plt/1")
             shutil.rmtree("plt/2");os.mkdir("plt/2")
@@ -707,129 +703,97 @@ class FlockingControlAlgorithm:
             
             nuavs = []
             for idx,uav in enumerate(self.uavs):
-                
-                def objective_func(wi):
-                    
-                    vo = self.obstacle_avoidance_model.calculate_force(uav,self.obstacles,self.ve,wi[idx])
-                    vf_dot = self.flocking_model.calculate_acc(uav,self.uavs,wi,self.ve,self.he,self.obstacle_avoidance_model)
-
-                    u = np.zeros(vf_dot.shape)
-                    u[:2] = vf_dot[:2] + (vo[:2]-uav.vec_Vxy)
-                    u[2] = vf_dot[2]
-                    u[np.abs(u) < self.ulim] = 0
-
-                    Vxy_c = self.uav_model.tau_v*(u[0]*np.cos(uav.psi)+u[1]*np.sin(uav.psi)) + uav.Vxy
-                    psi_c = self.uav_model.tau_psi/uav.Vxy*(u[1]*np.cos(uav.psi)-u[0]*np.sin(uav.psi)) + uav.psi
-                    h_c = uav.h + self.uav_model.tau_h/self.uav_model.tau_lambda*uav.lambda_+self.uav_model.tau_h*u[2]
-                    # h_c = self.he # TODO daha iyi sonuc veriyor
-
-                    dummy = np.linalg.norm(self.ve[:2])
-                    if np.abs(Vxy_c-dummy) < self.Vxy_c_lim: Vxy_c = dummy
-                    dummy = np.arctan2(self.ve[1],self.ve[0])
-                    if np.abs(psi_c - dummy) < self.psi_c_lim: psi_c = dummy
-
-                    new_uav_of = self.uav_model.update_state(uav,{"Vxy_c":Vxy_c,"psi_c":psi_c,"h_c":h_c},self.dt)
-
-                    dummy_uavs = self.uavs.copy()
-                    dummy_uavs[idx] = new_uav_of
-
-                    cost1 = self.performance_critetia.cost1(new_uav_of,self.ve,self.obstacle_avoidance_model.get_A0(uav,self.obstacles,self.ve)[0])
-                    cost2 = self.performance_critetia.cost2(new_uav_of,dummy_uavs)
-                    cost3 = self.performance_critetia.cost3(new_uav_of,self.obstacles)
-                    cost4 = self.performance_critetia.cost4(new_uav_of,dummy_uavs)
-
-                    return [cost1,cost2] if cost3+cost4 == 0 else [2000.0,2000.0]
-                
-                # mpio = DataClass()
-                # mpio.dimention = len(self.w[0])
-                # mpio.n = self.num_pigeons 
-                # mpio.X = np.random.uniform(0,1, (mpio.n, mpio.dimention))
-                # mpio.V = np.random.uniform(-0.05, 0.05, (mpio.n, mpio.dimention))
-                # mpio.Nc = 1
-                
-                # mpio.Xl,mpio.Xu = 0,1
-                # mpio.Vl,mpio.Vu = -0.05,0.05
-                # mpio.Nc3_max = 20
-                # mpio.pl = 0.9
-                # mpio.Nd = 2
-                # mpio.R = 0.3
-                # mpio.ft = 3
-                # mpio.sl = 2
-                # mpio.e = 0.01
-                # mpio.of = objective_func
-                # mpio.archive = []
-
-
-                # # step 5
-                # while mpio.Nc <= mpio.Nc3_max:
-                #     # print("Nc",mpio.Nc)
-                #     mpio.objectives = [mpio.of(wi) for wi in mpio.X]
-                #     mpio.indexs, mpio.ranks, _ = NSGA2Sorter.nsga2_sort(mpio.objectives)
-
-                #     mpio.fronts_idx = [i for i in range(len(mpio.ranks)) if mpio.ranks[i] == 1]
-
-                #     mpio.Xcenter = mpio.X[mpio.fronts_idx].mean(axis=0)
-
-                #     mpio.archive.extend([mpio.X[i] for i in mpio.fronts_idx])
-                #     if mpio.archive:
-                #         archive_objectives = [mpio.of(pos) for pos in mpio.archive]
-                #         archive_ranks = NSGA2Sorter._pareto_sorting(archive_objectives)
-                #         mpio.archive = [pos for pos, rank in zip(mpio.archive, archive_ranks) if rank == 1]
-
-                #     mpio.Xg = mpio.archive[np.random.randint(len(mpio.archive))]
-                #     mpio.Nc+=1
-
-                #     # step 6
-                #     mpio.i = 1
-                #     mpio.nX = mpio.X.copy()
-                #     mpio.nV = mpio.V.copy()
-                #     # step7
-                #     while mpio.i <= mpio.n:
-                #         if mpio.ranks[mpio.indexs.index(mpio.i-1)] < mpio.pl*mpio.n:
-
-                #             dummy_log = np.log(mpio.Nc)/np.log(mpio.Nc3_max)
-                #             mpio.nV[mpio.i-1] = np.exp(-mpio.R*mpio.Nc)*mpio.V[mpio.i-1]+np.random.random()*mpio.ft*(1-dummy_log)*(mpio.Xg-mpio.X[mpio.i-1]) + np.random.random()*mpio.ft*dummy_log*(mpio.Xcenter-mpio.X[mpio.i-1])
-                #             mpio.nX[mpio.i-1] = mpio.X[mpio.i-1] + np.clip(mpio.nV[mpio.i-1],mpio.Vl,mpio.Vu)
-
-                #         else:
-                #             k = 1
-                #             while k <= mpio.sl:
-                #                 valid_pigeons = [j for j in range(mpio.n) if mpio.ranks[j] < mpio.ranks[mpio.i-1]]
-                #                 if valid_pigeons:
-                #                     dim = int(np.random.random()*mpio.dimention)
-                #                     mpio.nX[mpio.i-1][dim] = np.clip(mpio.X[np.random.choice(valid_pigeons)][dim]+ mpio.e*np.random.random(),mpio.Xl,mpio.Xu)
-                #                 k+=1
-                        
-                #         mpio.new_objective = mpio.of(mpio.nX[mpio.i-1])
-                #         if NSGA2Sorter._dominates(mpio.objectives[mpio.i-1],mpio.new_objective):
-                #             mpio.nX[mpio.i-1] = mpio.X[mpio.i-1]
-                #             mpio.new_objective = mpio.objectives[mpio.i-1]
-                        
-                #         mpio.X = mpio.nX.copy()
-                #         mpio.V = mpio.nV.copy()
-                #         mpio.objectives[mpio.i-1] = mpio.new_objective
-                    
-                #         # step 8
-                #         mpio.i += 1
-
-                #     if mpio.Nc <= mpio.Nc3_max and mpio.n > mpio.Nd:
-                #         to_remove = sorted(range(mpio.n), key=lambda x: mpio.ranks[x], reverse=True)[:min(mpio.Nd, mpio.n)]
-                #         mpio.X = np.delete(mpio.X, to_remove, axis=0)
-                #         mpio.V = np.delete(mpio.V, to_remove, axis=0)
-                #         mpio.n -= len(to_remove)
-                
-                # mpio.final_objectives = [mpio.of(x) for x in mpio.X[:mpio.n]]
-                # cost2_values = [obj[1] for obj in mpio.final_objectives]
-                self.w[idx] = ModifiedMPIO().optimize(objective_func)[0]
-                # mpio.X[np.argmin(cost2_values)].tolist()
-
-                
                 vo = self.obstacle_avoidance_model.calculate_force(uav,self.obstacles,self.ve,self.w[idx][idx])
                 vf_dot = self.flocking_model.calculate_acc(uav,self.uavs,self.w[idx],self.ve,self.he,self.obstacle_avoidance_model)
                 vf_dots.append(vf_dot)
                 if uav.debug == 1:
                     self.obstacle_avoidance_model.gp.append((vo,))
                 vos.append(vo)
+                
+                def objective_func(wi):
+
+                    cost1 = self.performance_critetia.cost1(uav,self.ve,self.obstacle_avoidance_model.get_A0(uav,self.obstacles,self.ve)[0])
+                    cost2 = self.performance_critetia.cost2(uav,self.uavs)
+                    cost3 = self.performance_critetia.cost3(uav,self.obstacles)
+                    cost4 = self.performance_critetia.cost4(uav,self.uavs)
+
+                    return [cost1,cost2] if cost3+cost4 == 0 else [2000.0,2000.0]
+                
+                mpio = DataClass()
+                mpio.dimention = len(self.w[0])
+                mpio.n = self.num_pigeons 
+                mpio.X = np.array(self.w.copy())
+                mpio.V = np.zeros(mpio.X.shape)
+                mpio.Nc = 1
+                
+                mpio.Xl,mpio.Xu = 0,1
+                mpio.Vl,mpio.Vu = -0.05,0.05
+                mpio.Nc3_max = 20
+                mpio.pl = 0.9
+                mpio.Nd = 2
+                mpio.R = 0.3
+                mpio.ft = 3
+                mpio.of = objective_func
+                mpio.archive = []
+
+                mpio.objectives = [mpio.of(wi) for wi in self.w]
+
+                mpio.indexs, mpio.ranks, _ = NSGA2Sorter.nsga2_sort(mpio.objectives)
+                mpio.fronts_idx = [i for i in range(len(mpio.ranks)) if mpio.ranks[i] == 1]
+
+                mpio.Xcenter = mpio.X[mpio.fronts_idx].mean(axis=0)
+
+                mpio.archive.extend([mpio.X[i] for i in mpio.fronts_idx])
+                if mpio.archive:
+                    archive_objectives = [mpio.of(pos) for pos in mpio.archive]
+                    archive_ranks = NSGA2Sorter._pareto_sorting(archive_objectives)
+                    mpio.archive = [pos for pos, rank in zip(mpio.archive, archive_ranks) if rank == 1]
+
+                mpio.Xg = mpio.archive[np.random.randint(len(mpio.archive))]
+                mpio.Nc+=1
+                mpio.i = 1
+                mpio.nX = mpio.X.copy()
+                mpio.nV = mpio.V.copy()
+
+                while mpio.i <= mpio.n:
+                    if mpio.ranks[mpio.indexs.index(mpio.i-1)] < mpio.pl*mpio.n:
+
+                        dummy_log = np.log(mpio.Nc)/np.log(mpio.Nc3_max)
+                        mpio.nV[mpio.i-1] = np.exp(-mpio.R*mpio.Nc)*mpio.V[mpio.i-1]+np.random.random()*mpio.ft*(1-dummy_log)*(mpio.Xg-mpio.X[mpio.i-1]) + np.random.random()*mpio.ft*dummy_log*(mpio.Xcenter-mpio.X[mpio.i-1])
+                        mpio.nX[mpio.i-1] = mpio.X[mpio.i-1] + np.clip(mpio.nV[mpio.i-1],mpio.Vl,mpio.Vu)
+
+                    else:
+                        k = 1
+                        while k <= self.sl:
+                            valid_pigeons = [j for j in range(mpio.n) if mpio.ranks[j] < mpio.ranks[mpio.i-1]]
+                            if valid_pigeons:
+                                dim = np.ceil(np.random.random()*mpio.dimention)
+                                mpio.nX[mpio.i-1][dim] = np.clip(mpio.X[np.random.choice(valid_pigeons)][dim]+ self.e*np.random.random(),self.Xl,self.Xu)
+                            k+=1
+                    
+                    mpio.new_objective = mpio.of(mpio.nX[mpio.i-1])
+                    if NSGA2Sorter._dominates(mpio.objectives[mpio.i-1],mpio.new_objective):
+                        mpio.nX[mpio.i-1] = mpio.X[mpio.i-1]
+                        mpio.new_objective = mpio.objectives[mpio.i-1]
+                    
+                    mpio.X = mpio.nX.copy()
+                    mpio.V = mpio.nV.copy()
+                    mpio.objectives[mpio.i-1] = mpio.new_objective
+                
+                    mpio.i += 1
+
+                if mpio.Nc <= mpio.Nc3_max and mpio.n > mpio.Nd:
+                    to_remove = sorted(range(mpio.n), key=lambda x: mpio.ranks[x], reverse=True)[:min(mpio.Nd, mpio.n)]
+                    mpio.X = np.delete(mpio.X, to_remove, axis=0)
+                    mpio.V = np.delete(mpio.V, to_remove, axis=0)
+                    mpio.n -= len(to_remove)
+                
+                mpio.final_objectives = [objective_func(x) for x in mpio.X[:mpio.n]]
+                cost2_values = [obj[1] for obj in mpio.final_objectives]
+                self.w[idx] = mpio.X[np.argmin(cost2_values)].tolist()
+
+                # cost2s = [mpio.objectives[i][1] if i in mpio.fronts_idx else float("inf") for i in range(mpio.n)]
+                # self.w[idx] = mpio.X[np.argmin(cost2s)]
 
                 u = np.zeros(vf_dot.shape)
                 u[:2] = vf_dot[:2] + (vo[:2]-uav.vec_Vxy)
@@ -1012,11 +976,11 @@ class FlockingControlAlgorithm:
         self.ax.set_aspect('equal')
         self.ax.grid(True)
 
-        # [ax.clear() for ax in self.axs]
-        # [ax.set_xlim(-50, 450) for ax in self.axs]
-        # [ax.set_ylim(-50, 250) for ax in self.axs]
-        # [ax.set_aspect('equal') for ax in self.axs]
-        # [ax.grid(True) for ax in self.axs]
+        [ax.clear() for ax in self.axs]
+        [ax.set_xlim(-50, 450) for ax in self.axs]
+        [ax.set_ylim(-50, 250) for ax in self.axs]
+        [ax.set_aspect('equal') for ax in self.axs]
+        [ax.grid(True) for ax in self.axs]
 
         
         # Colors for different UAVs
@@ -1029,13 +993,13 @@ class FlockingControlAlgorithm:
 
             circle = plt.Circle((obs.x, obs.y), obs.radius+self.obstacle_avoidance_model.R2_lim, fill=False, color='black', linewidth=2, linestyle='-')
             self.ax.add_patch(circle)
-            # [ax.add_patch(plt.Circle((obs.x, obs.y), obs.radius, fill=False, color='black', linewidth=2, linestyle='-')) for ax in self.axs]
-            # [ax.add_patch(plt.Circle((obs.x, obs.y), obs.radius+self.obstacle_avoidance_model.R2_lim, fill=False, color='black', linewidth=2, linestyle='-')) for ax in self.axs]
+            [ax.add_patch(plt.Circle((obs.x, obs.y), obs.radius, fill=False, color='black', linewidth=2, linestyle='-')) for ax in self.axs]
+            [ax.add_patch(plt.Circle((obs.x, obs.y), obs.radius+self.obstacle_avoidance_model.R2_lim, fill=False, color='black', linewidth=2, linestyle='-')) for ax in self.axs]
             # Add obstacle label
             self.ax.text(obs.x, obs.y, f'O{i+1}', ha='center', va='center', 
                         fontsize=8, weight='bold')
-            # [ax.text(obs.x, obs.y, f'O{i+1}', ha='center', va='center', 
-            #             fontsize=8, weight='bold') for ax in self.axs]
+            [ax.text(obs.x, obs.y, f'O{i+1}', ha='center', va='center', 
+                        fontsize=8, weight='bold') for ax in self.axs]
 
 
         # Draw UAVs and their vectors
@@ -1060,8 +1024,8 @@ class FlockingControlAlgorithm:
             # uav_circle_com = plt.Circle((uav.x, uav.y), 105,
                                 #   fill=True, color=color, alpha=0.7)
             self.ax.add_patch(uav_circle)
-            # [ax.add_patch(plt.Circle((uav.x, uav.y), 3, 
-            #                       fill=True, color=color, alpha=0.7)) for l,ax in enumerate(self.axs) if l == i]
+            [ax.add_patch(plt.Circle((uav.x, uav.y), 3, 
+                                  fill=True, color=color, alpha=0.7)) for l,ax in enumerate(self.axs) if l == i]
 
             # self.ax.add_patch(uav_circle_com)
             
@@ -1069,8 +1033,8 @@ class FlockingControlAlgorithm:
             # UAV label
             self.ax.text(uav.x, uav.y, f'{i+1}', ha='center', va='center', 
                         fontsize=10, weight='bold', color='white')
-            # [ax.text(uav.x, uav.y, f'{i+1}', ha='center', va='center', 
-            #             fontsize=10, weight='bold', color='white') for l,ax in enumerate(self.axs) if l == i]
+            [ax.text(uav.x, uav.y, f'{i+1}', ha='center', va='center', 
+                        fontsize=10, weight='bold', color='white') for l,ax in enumerate(self.axs) if l == i]
 
             
             # # Current velocity vector (thick arrow)
@@ -1078,9 +1042,9 @@ class FlockingControlAlgorithm:
             #              head_width=2, head_length=3, fc=color, ec=color, 
             #              linewidth=3, alpha=0.8, label=f'UAV{i+1} Vel' if i == 0 else "")
             
-            # [ax.arrow(uav.x, uav.y, uav.Vx*2, uav.Vy*2, 
-            #              head_width=1.5, head_length=2, fc=color, ec=color, 
-            #              linewidth=2, alpha=0.8, label=f'UAV{i+1} Vel' if i == 0 else "") for l,ax in enumerate(self.axs) if l == i]
+            [ax.arrow(uav.x, uav.y, uav.Vx*2, uav.Vy*2, 
+                         head_width=1.5, head_length=2, fc=color, ec=color, 
+                         linewidth=2, alpha=0.8, label=f'UAV{i+1} Vel' if i == 0 else "") for l,ax in enumerate(self.axs) if l == i]
 
 
             # vf_dot vector (flocking force) - green arrows
@@ -1091,10 +1055,10 @@ class FlockingControlAlgorithm:
                                 head_width=1.5, head_length=2, fc='lime', ec='lime', 
                                 linewidth=2, alpha=0.7, linestyle='--',
                                 label='Flocking Force' if i == 0 else "")
-                # [ax.arrow(uav.x, uav.y, vf[0]*5, vf[1]*5, 
-                #                 head_width=1.5, head_length=2, fc='lime', ec='lime', 
-                #                 linewidth=2, alpha=0.7, linestyle='--',
-                #                 label='Flocking Force' if i == 0 else "") for l,ax in enumerate(self.axs) if l == i]
+                [ax.arrow(uav.x, uav.y, vf[0]*5, vf[1]*5, 
+                                head_width=1.5, head_length=2, fc='lime', ec='lime', 
+                                linewidth=2, alpha=0.7, linestyle='--',
+                                label='Flocking Force' if i == 0 else "") for l,ax in enumerate(self.axs) if l == i]
                 
             
             # vo vector (obstacle avoidance) - red arrows
@@ -1106,10 +1070,10 @@ class FlockingControlAlgorithm:
                                 linewidth=2, alpha=0.7, linestyle=':',
                                 label='Obstacle Avoidance' if i == 0 else "")
 
-                # [ax.arrow(uav.x, uav.y, vo[0]*3, vo[1]*3, 
-                #                 head_width=1.5, head_length=2, fc='red', ec='red', 
-                #                 linewidth=2, alpha=0.7, linestyle=':',
-                #                 label='Obstacle Avoidance' if i == 0 else "") for l,ax in enumerate(self.axs) if l == i]
+                [ax.arrow(uav.x, uav.y, vo[0]*3, vo[1]*3, 
+                                head_width=1.5, head_length=2, fc='red', ec='red', 
+                                linewidth=2, alpha=0.7, linestyle=':',
+                                label='Obstacle Avoidance' if i == 0 else "") for l,ax in enumerate(self.axs) if l == i]
             # UAV info text
             # info_text = f'UAV{i+1}\nPos: ({uav.x:.1f}, {uav.y:.1f})\nAlt: {uav.h:.1f}m\nSpeed: {uav.Vxy:.1f}m/s'
             # self.ax.text(uav.x + 8, uav.y, info_text, fontsize=8, 
@@ -1120,9 +1084,9 @@ class FlockingControlAlgorithm:
         self.ax.arrow(center_x, center_y, self.ve[0]*3, self.ve[1]*3, 
                      head_width=3, head_length=4, fc='black', ec='black', 
                      linewidth=4, alpha=0.9, label='Expected Velocity')
-        # [ax.arrow(center_x, center_y, self.ve[0]*3, self.ve[1]*3, 
-        #              head_width=3, head_length=4, fc='black', ec='black', 
-        #              linewidth=4, alpha=0.9, label='Expected Velocity') for l,ax in enumerate(self.axs)]
+        [ax.arrow(center_x, center_y, self.ve[0]*3, self.ve[1]*3, 
+                     head_width=3, head_length=4, fc='black', ec='black', 
+                     linewidth=4, alpha=0.9, label='Expected Velocity') for l,ax in enumerate(self.axs)]
 
         
         # # Debug information panel
@@ -1140,14 +1104,13 @@ class FlockingControlAlgorithm:
         # Title and legend
         self.ax.set_title(f'UAV Flocking Simulation - Time: {t:.1f}s', fontsize=14, weight='bold')
         self.ax.legend(loc='upper right', fontsize=8)
-        
-        # [ax.set_title(f'UAV Flocking Simulation - Time: {t:.1f}s', fontsize=14, weight='bold') for l,ax in enumerate(self.axs)]
-        # [ax.legend(loc='upper right', fontsize=8) for l,ax in enumerate(self.axs)]
+        [ax.set_title(f'UAV Flocking Simulation - Time: {t:.1f}s', fontsize=14, weight='bold') for l,ax in enumerate(self.axs)]
+        [ax.legend(loc='upper right', fontsize=8) for l,ax in enumerate(self.axs)]
 
 
-        # self.fig.savefig(f"plt/all/"+str(len(os.listdir(f"plt/all/")))+".png")
-        # [fig.savefig(f"plt/{l+1}/"+str(len(os.listdir(f"plt/{l+1}/")))+".png") for l,fig in enumerate(self.figs)]
-        # [plt.close(fig) for l,fig in enumerate(self.figs)]
+        self.fig.savefig(f"plt/all/"+str(len(os.listdir(f"plt/all/")))+".png")
+        [fig.savefig(f"plt/{l+1}/"+str(len(os.listdir(f"plt/{l+1}/")))+".png") for l,fig in enumerate(self.figs)]
+        [plt.close(fig) for l,fig in enumerate(self.figs)]
 
         
         plt.pause(0.1) # Small pause for animation
