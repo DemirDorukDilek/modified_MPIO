@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 
 
 import numpy as np
-from main import ModifiedMPIO
+
 
 
 
@@ -121,7 +121,7 @@ class NSGA2Sorter:
         Returns:
             List of (solution_index, rank, crowding_distance) sorted by NSGA-II criteria
         """
-        ranks = NSGA2Sorter._pareto_sorting(objectives)
+        return NSGA2Sorter._pareto_sorting(objectives)
         
         fronts = NSGA2Sorter._get_fronts(objectives, ranks)
         
@@ -455,14 +455,14 @@ class Cost:
 
     def cost1(self, uav: UAV, ve: np.ndarray, attention: List[Obstacle]):
         
-        if len(attention) == 0:
+        if len(attention) == 0 or True:
             cost1 = np.abs(uav.Vx - ve[0]) + np.abs(uav.Vy - ve[1])
         else:
             cost1 = -uav.xy.dot(ve[:2])/np.linalg.norm(ve[:2])
         return cost1
     
     def cost2(self, uav: UAV, uavs: List[UAV]):
-
+        return np.abs(uav.Vx - 10) + np.abs(uav.Vy - 0)
         cost2 = 0
         for o_uav in uavs:
             if uav is o_uav: continue
@@ -475,7 +475,7 @@ class Cost:
 
         for obstacle in obstacles:
             if np.linalg.norm(uav.xy-obstacle.xy) <= self.R2_lim + obstacle.radius:
-                return 1
+                return 0
         return 0
     
     def cost4(self, uav: UAV, uavs: List[UAV]):
@@ -483,7 +483,7 @@ class Cost:
         for o_uav in uavs:
             if uav is o_uav: continue
             if np.linalg.norm(uav.xy-o_uav.xy) <= self.R1_lim:
-                return 1
+                return 0
         return 0
 
 
@@ -707,31 +707,37 @@ class FlockingControlAlgorithm:
             
             nuavs = []
             for idx,uav in enumerate(self.uavs):
+                vo = self.obstacle_avoidance_model.calculate_force(uav,self.obstacles,self.ve,self.w[idx][idx])
+                vf_dot = self.flocking_model.calculate_acc(uav,self.uavs,self.w[idx],self.ve,self.he,self.obstacle_avoidance_model)
+                vf_dots.append(vf_dot)
+                if uav.debug == 1:
+                    self.obstacle_avoidance_model.gp.append((vo,))
+                vos.append(vo)
                 
                 def objective_func(wi):
-                    
-                    vo = self.obstacle_avoidance_model.calculate_force(uav,self.obstacles,self.ve,wi[idx])
-                    vf_dot = self.flocking_model.calculate_acc(uav,self.uavs,wi,self.ve,self.he,self.obstacle_avoidance_model)
-
-                    u = np.zeros(vf_dot.shape)
-                    u[:2] = vf_dot[:2] + (vo[:2]-uav.vec_Vxy)
-                    u[2] = vf_dot[2]
-                    u[np.abs(u) < self.ulim] = 0
-
-                    Vxy_c = self.uav_model.tau_v*(u[0]*np.cos(uav.psi)+u[1]*np.sin(uav.psi)) + uav.Vxy
-                    psi_c = self.uav_model.tau_psi/uav.Vxy*(u[1]*np.cos(uav.psi)-u[0]*np.sin(uav.psi)) + uav.psi
-                    h_c = uav.h + self.uav_model.tau_h/self.uav_model.tau_lambda*uav.lambda_+self.uav_model.tau_h*u[2]
-                    # h_c = self.he # TODO daha iyi sonuc veriyor
-
-                    dummy = np.linalg.norm(self.ve[:2])
-                    if np.abs(Vxy_c-dummy) < self.Vxy_c_lim: Vxy_c = dummy
-                    dummy = np.arctan2(self.ve[1],self.ve[0])
-                    if np.abs(psi_c - dummy) < self.psi_c_lim: psi_c = dummy
-
-                    new_uav_of = self.uav_model.update_state(uav,{"Vxy_c":Vxy_c,"psi_c":psi_c,"h_c":h_c},self.dt)
-
                     dummy_uavs = self.uavs.copy()
-                    dummy_uavs[idx] = new_uav_of
+                    for i in [x for x in range(len(self.w)) if idx != x]+[idx]:
+                        vo = self.obstacle_avoidance_model.calculate_force(self.uavs[i],self.obstacles,self.ve,self.w[i][i] if i != idx else wi[idx])
+                        vf_dot = self.flocking_model.calculate_acc(self.uavs[i],self.uavs,self.w[i] if i != idx else wi,self.ve,self.he,self.obstacle_avoidance_model)
+
+                        u = np.zeros(vf_dot.shape)
+                        u[:2] = vf_dot[:2] + (vo[:2]-uav.vec_Vxy)
+                        u[2] = vf_dot[2]
+                        u[np.abs(u) < self.ulim] = 0
+
+                        Vxy_c = self.uav_model.tau_v*(u[0]*np.cos(uav.psi)+u[1]*np.sin(uav.psi)) + uav.Vxy
+                        psi_c = self.uav_model.tau_psi/uav.Vxy*(u[1]*np.cos(uav.psi)-u[0]*np.sin(uav.psi)) + uav.psi
+                        h_c = uav.h + self.uav_model.tau_h/self.uav_model.tau_lambda*uav.lambda_+self.uav_model.tau_h*u[2]
+                        # h_c = self.he # TODO daha iyi sonuc veriyor
+
+                        dummy = np.linalg.norm(self.ve[:2])
+                        if np.abs(Vxy_c-dummy) < self.Vxy_c_lim: Vxy_c = dummy
+                        dummy = np.arctan2(self.ve[1],self.ve[0])
+                        if np.abs(psi_c - dummy) < self.psi_c_lim: psi_c = dummy
+                        # print({"Vxy_c":Vxy_c,"psi_c":psi_c,"h_c":h_c})
+                        new_uav_of = self.uav_model.update_state(uav,{"Vxy_c":Vxy_c,"psi_c":psi_c,"h_c":h_c},self.dt)
+                        dummy_uavs[i] = new_uav_of
+
 
                     cost1 = self.performance_critetia.cost1(new_uav_of,self.ve,self.obstacle_avoidance_model.get_A0(uav,self.obstacles,self.ve)[0])
                     cost2 = self.performance_critetia.cost2(new_uav_of,dummy_uavs)
@@ -740,96 +746,93 @@ class FlockingControlAlgorithm:
 
                     return [cost1,cost2] if cost3+cost4 == 0 else [2000.0,2000.0]
                 
-                # mpio = DataClass()
-                # mpio.dimention = len(self.w[0])
-                # mpio.n = self.num_pigeons 
-                # mpio.X = np.random.uniform(0,1, (mpio.n, mpio.dimention))
-                # mpio.V = np.random.uniform(-0.05, 0.05, (mpio.n, mpio.dimention))
-                # mpio.Nc = 1
+                mpio = DataClass()
+                mpio.dimention = len(self.w[0])
+                mpio.n = self.num_pigeons 
+                mpio.X = np.random.uniform(0,1, (mpio.n, mpio.dimention))
+                mpio.V = np.random.uniform(-0.05, 0.05, (mpio.n, mpio.dimention))
+                mpio.Nc = 1
                 
-                # mpio.Xl,mpio.Xu = 0,1
-                # mpio.Vl,mpio.Vu = -0.05,0.05
-                # mpio.Nc3_max = 20
-                # mpio.pl = 0.9
-                # mpio.Nd = 2
-                # mpio.R = 0.3
-                # mpio.ft = 3
-                # mpio.sl = 2
-                # mpio.e = 0.01
-                # mpio.of = objective_func
-                # mpio.archive = []
+                mpio.Xl,mpio.Xu = 0,1
+                mpio.Vl,mpio.Vu = -0.05,0.05
+                mpio.Nc3_max = 20
+                mpio.pl = 0.9
+                mpio.Nd = 2
+                mpio.R = 0.3
+                mpio.ft = 3
+                mpio.sl = 2
+                mpio.e = 0.01
+                mpio.of = objective_func
+                mpio.archive = []
 
 
-                # # step 5
-                # while mpio.Nc <= mpio.Nc3_max:
-                #     # print("Nc",mpio.Nc)
-                #     mpio.objectives = [mpio.of(wi) for wi in mpio.X]
-                #     mpio.indexs, mpio.ranks, _ = NSGA2Sorter.nsga2_sort(mpio.objectives)
+                # step 5
+                while mpio.Nc <= mpio.Nc3_max:
+                    # print("Nc",mpio.Nc)
+                    mpio.objectives = [mpio.of(wi) for wi in mpio.X]
+                    mpio.ranks = NSGA2Sorter.nsga2_sort(mpio.objectives)
 
-                #     mpio.fronts_idx = [i for i in range(len(mpio.ranks)) if mpio.ranks[i] == 1]
+                    mpio.fronts_idx = [i for i in range(len(mpio.ranks)) if mpio.ranks[i] == 1]
 
-                #     mpio.Xcenter = mpio.X[mpio.fronts_idx].mean(axis=0)
+                    mpio.Xcenter = mpio.X[mpio.fronts_idx].mean(axis=0)
 
-                #     mpio.archive.extend([mpio.X[i] for i in mpio.fronts_idx])
-                #     if mpio.archive:
-                #         archive_objectives = [mpio.of(pos) for pos in mpio.archive]
-                #         archive_ranks = NSGA2Sorter._pareto_sorting(archive_objectives)
-                #         mpio.archive = [pos for pos, rank in zip(mpio.archive, archive_ranks) if rank == 1]
+                    mpio.archive.extend([mpio.X[i] for i in mpio.fronts_idx])
+                    if mpio.archive:
+                        archive_objectives = [mpio.of(pos) for pos in mpio.archive]
+                        archive_ranks = NSGA2Sorter._pareto_sorting(archive_objectives)
+                        mpio.archive = [pos for pos, rank in zip(mpio.archive, archive_ranks) if rank == 1]
 
-                #     mpio.Xg = mpio.archive[np.random.randint(len(mpio.archive))]
-                #     mpio.Nc+=1
+                    mpio.Xg = mpio.archive[np.random.randint(len(mpio.archive))]
+                    mpio.Nc+=1
 
-                #     # step 6
-                #     mpio.i = 1
-                #     mpio.nX = mpio.X.copy()
-                #     mpio.nV = mpio.V.copy()
-                #     # step7
-                #     while mpio.i <= mpio.n:
-                #         if mpio.ranks[mpio.indexs.index(mpio.i-1)] < mpio.pl*mpio.n:
+                    # step 6
+                    mpio.i = 1
+                    mpio.nX = mpio.X.copy()
+                    mpio.nV = mpio.V.copy()
+                    # step7
+                    while mpio.i <= mpio.n:
+                        if mpio.ranks[mpio.i-1] < int(np.ceil(mpio.pl*mpio.n)):
 
-                #             dummy_log = np.log(mpio.Nc)/np.log(mpio.Nc3_max)
-                #             mpio.nV[mpio.i-1] = np.exp(-mpio.R*mpio.Nc)*mpio.V[mpio.i-1]+np.random.random()*mpio.ft*(1-dummy_log)*(mpio.Xg-mpio.X[mpio.i-1]) + np.random.random()*mpio.ft*dummy_log*(mpio.Xcenter-mpio.X[mpio.i-1])
-                #             mpio.nX[mpio.i-1] = mpio.X[mpio.i-1] + np.clip(mpio.nV[mpio.i-1],mpio.Vl,mpio.Vu)
+                            dummy_log = np.log(mpio.Nc)/np.log(mpio.Nc3_max)
+                            mpio.nV[mpio.i-1] = np.exp(-mpio.R*mpio.Nc)*mpio.V[mpio.i-1]+np.random.random()*mpio.ft*(1-dummy_log)*(mpio.Xg-mpio.X[mpio.i-1]) + np.random.random()*mpio.ft*dummy_log*(mpio.Xcenter-mpio.X[mpio.i-1])
+                            mpio.nX[mpio.i-1] = mpio.X[mpio.i-1] + np.clip(mpio.nV[mpio.i-1],mpio.Vl,mpio.Vu)
 
-                #         else:
-                #             k = 1
-                #             while k <= mpio.sl:
-                #                 valid_pigeons = [j for j in range(mpio.n) if mpio.ranks[j] < mpio.ranks[mpio.i-1]]
-                #                 if valid_pigeons:
-                #                     dim = int(np.random.random()*mpio.dimention)
-                #                     mpio.nX[mpio.i-1][dim] = np.clip(mpio.X[np.random.choice(valid_pigeons)][dim]+ mpio.e*np.random.random(),mpio.Xl,mpio.Xu)
-                #                 k+=1
+                        else:
+                            k = 1
+                            while k <= mpio.sl:
+                                valid_pigeons = [j for j in range(mpio.n) if mpio.ranks[j] < mpio.ranks[mpio.i-1]]
+                                if valid_pigeons:
+                                    dim = int(np.random.random()*mpio.dimention)
+                                    mpio.nX[mpio.i-1][dim] = np.clip(mpio.X[np.random.choice(valid_pigeons)][dim]+ mpio.e*np.random.random(),mpio.Xl,mpio.Xu)
+                                k+=1
                         
-                #         mpio.new_objective = mpio.of(mpio.nX[mpio.i-1])
-                #         if NSGA2Sorter._dominates(mpio.objectives[mpio.i-1],mpio.new_objective):
-                #             mpio.nX[mpio.i-1] = mpio.X[mpio.i-1]
-                #             mpio.new_objective = mpio.objectives[mpio.i-1]
+                        mpio.new_objective = mpio.of(mpio.nX[mpio.i-1])
+                        if NSGA2Sorter._dominates(mpio.objectives[mpio.i-1],mpio.new_objective):
+                            mpio.nX[mpio.i-1] = mpio.X[mpio.i-1]
+                            mpio.new_objective = mpio.objectives[mpio.i-1]
                         
-                #         mpio.X = mpio.nX.copy()
-                #         mpio.V = mpio.nV.copy()
-                #         mpio.objectives[mpio.i-1] = mpio.new_objective
+                        mpio.X = mpio.nX.copy()
+                        mpio.V = mpio.nV.copy()
+                        mpio.objectives[mpio.i-1] = mpio.new_objective
                     
-                #         # step 8
-                #         mpio.i += 1
+                        # step 8
+                        mpio.i += 1
 
-                #     if mpio.Nc <= mpio.Nc3_max and mpio.n > mpio.Nd:
-                #         to_remove = sorted(range(mpio.n), key=lambda x: mpio.ranks[x], reverse=True)[:min(mpio.Nd, mpio.n)]
-                #         mpio.X = np.delete(mpio.X, to_remove, axis=0)
-                #         mpio.V = np.delete(mpio.V, to_remove, axis=0)
-                #         mpio.n -= len(to_remove)
+                    if mpio.Nc <= mpio.Nc3_max and mpio.n > mpio.Nd:
+                        to_remove = sorted(range(mpio.n), key=lambda x: mpio.ranks[x], reverse=True)[:min(mpio.Nd, mpio.n)]
+                        mpio.X = np.delete(mpio.X, to_remove, axis=0)
+                        mpio.V = np.delete(mpio.V, to_remove, axis=0)
+                        mpio.n -= len(to_remove)
                 
-                # mpio.final_objectives = [mpio.of(x) for x in mpio.X[:mpio.n]]
-                # cost2_values = [obj[1] for obj in mpio.final_objectives]
-                self.w[idx] = ModifiedMPIO().optimize(objective_func)[0]
-                # mpio.X[np.argmin(cost2_values)].tolist()
+                mpio.final_objectives = [mpio.of(x) for x in mpio.X[:mpio.n]]
+                cost2_values = [obj[1] for obj in mpio.final_objectives]
+                tmp = np.argmin(cost2_values)
+                if NSGA2Sorter._dominates(mpio.final_objectives[tmp], mpio.of(self.w[idx])):
+                    self.w[idx]  = mpio.X[tmp].tolist()
 
                 
-                vo = self.obstacle_avoidance_model.calculate_force(uav,self.obstacles,self.ve,self.w[idx][idx])
-                vf_dot = self.flocking_model.calculate_acc(uav,self.uavs,self.w[idx],self.ve,self.he,self.obstacle_avoidance_model)
-                vf_dots.append(vf_dot)
-                if uav.debug == 1:
-                    self.obstacle_avoidance_model.gp.append((vo,))
-                vos.append(vo)
+
+                
 
                 u = np.zeros(vf_dot.shape)
                 u[:2] = vf_dot[:2] + (vo[:2]-uav.vec_Vxy)
@@ -885,6 +888,10 @@ class FlockingControlAlgorithm:
             # Update debug values and render
             self.update_debug_values(t, total_costs)
             
+            with open("log.log","r",encoding='utf-8') as f:
+                r = f.read()
+            with open("log.log","w",encoding='utf-8') as f:
+                f.write(r+"\n"+str(self.w[0])+" ")
             # Render every few steps to avoid too frequent updates
             if int(t/self.dt) % 1 == 0: # Render every 2 steps
                 self.render_frame(t, vf_dots, vos)
