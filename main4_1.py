@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 import os
 import shutil
+import time
 from typing import Dict, List, Tuple
 import matplotlib.pyplot as plt
 
@@ -13,7 +14,7 @@ import numpy as np
 
 class NSGA2Sorter:
     @staticmethod
-    def _pareto_sorting(objectives: List[List[float]]) -> List[int]:
+    def pareto_sort(objectives: List[List[float]]) -> List[int]:
         """Pareto ranking of solutions (sizin kodunuz)"""
         n = len(objectives)
         ranks = [0] * n
@@ -24,9 +25,9 @@ class NSGA2Sorter:
         for i in range(n):
             for j in range(n):
                 if i != j:
-                    if NSGA2Sorter._dominates(objectives[i], objectives[j]):
+                    if NSGA2Sorter.dominates(objectives[i], objectives[j]):
                         dominated_solutions[i].append(j)
-                    elif NSGA2Sorter._dominates(objectives[j], objectives[i]):
+                    elif NSGA2Sorter.dominates(objectives[j], objectives[i]):
                         domination_count[i] += 1
        
 
@@ -51,7 +52,7 @@ class NSGA2Sorter:
         return ranks
    
     @staticmethod
-    def _dominates(obj1: List[float], obj2: List[float]) -> bool:
+    def dominates(obj1: List[float], obj2: List[float]) -> bool:
         """Check if obj1 dominates obj2 (for minimization) (sizin kodunuz)"""
         better_in_any = False
         for i in range(len(obj1)):
@@ -61,93 +62,6 @@ class NSGA2Sorter:
                 better_in_any = True
         return better_in_any
     
-
-    @staticmethod
-    def _calculate_crowding_distance(objectives: List[List[float]], 
-                                   front_indices: List[int]) -> List[float]:
-        """Calculate crowding distance for solutions in the same front"""
-        n = len(front_indices)
-        if n <= 2:
-            return [float('inf')] * n
-        
-        distances = [0.0] * n
-        n_objectives = len(objectives[0])
-        
-        for obj_idx in range(n_objectives):
-
-            sorted_indices = sorted(range(n), 
-                                  key=lambda i: objectives[front_indices[i]][obj_idx])
-            
-
-            distances[sorted_indices[0]] = float('inf')
-            distances[sorted_indices[-1]] = float('inf')
-            
-
-            obj_min = objectives[front_indices[sorted_indices[0]]][obj_idx]
-            obj_max = objectives[front_indices[sorted_indices[-1]]][obj_idx]
-            obj_range = obj_max - obj_min
-            
-            if obj_range > 0:
-                for i in range(1, n - 1):
-                    idx = sorted_indices[i]
-                    prev_idx = sorted_indices[i - 1]
-                    next_idx = sorted_indices[i + 1]
-                    
-                    prev_val = objectives[front_indices[prev_idx]][obj_idx]
-                    next_val = objectives[front_indices[next_idx]][obj_idx]
-                    
-                    distances[idx] += (next_val - prev_val) / obj_range
-        
-        return distances
-    
-    @staticmethod
-    def _get_fronts(objectives: List[List[float]], 
-                   ranks: List[int]) -> List[List[int]]:
-        """Group solutions by their Pareto rank"""
-        max_rank = max(ranks)
-        fronts = [[] for _ in range(max_rank)]
-        
-        for i, rank in enumerate(ranks):
-            fronts[rank - 1].append(i)
-        
-        return fronts
-    
-
-    @staticmethod
-    def nsga2_sort(objectives: List[List[float]]) -> List[Tuple[int, int, float]]:
-        """
-        Complete NSGA-II sorting
-        
-        Returns:
-            List of (solution_index, rank, crowding_distance) sorted by NSGA-II criteria
-        """
-        return NSGA2Sorter._pareto_sorting(objectives)
-        
-        fronts = NSGA2Sorter._get_fronts(objectives, ranks)
-        
-        idxs,ranks,dists = [],[],[]
-        
-        for front_idx, front in enumerate(fronts):
-            if not front:
-                continue
-                
-
-            distances = NSGA2Sorter._calculate_crowding_distance(objectives, front)
-            
-
-            for i, sol_idx in enumerate(front):
-                rank = front_idx + 1
-                crowding_dist = distances[i]
-                idxs.append(sol_idx)
-                ranks.append(rank)
-                dists.append(crowding_dist)
-
-        return idxs,ranks,dists
-
-
-
-
-
 
 class UAV:
     def __init__(self,xyz,Vxy,psi,lambda_):
@@ -454,15 +368,16 @@ class Cost:
         self.R2_lim = R2_lim
 
     def cost1(self, uav: UAV, ve: np.ndarray, attention: List[Obstacle]):
+        # return np.abs(uav.Vx - 10) + np.abs(uav.Vy - 0)
         
-        if len(attention) == 0 or True:
+        if len(attention) == 0:
             cost1 = np.abs(uav.Vx - ve[0]) + np.abs(uav.Vy - ve[1])
         else:
             cost1 = -uav.xy.dot(ve[:2])/np.linalg.norm(ve[:2])
         return cost1
     
     def cost2(self, uav: UAV, uavs: List[UAV]):
-        return np.abs(uav.Vx - 10) + np.abs(uav.Vy - 0)
+        # return np.abs(uav.Vx - 10) + np.abs(uav.Vy - 0)
         cost2 = 0
         for o_uav in uavs:
             if uav is o_uav: continue
@@ -475,7 +390,7 @@ class Cost:
 
         for obstacle in obstacles:
             if np.linalg.norm(uav.xy-obstacle.xy) <= self.R2_lim + obstacle.radius:
-                return 0
+                return 1
         return 0
     
     def cost4(self, uav: UAV, uavs: List[UAV]):
@@ -483,125 +398,121 @@ class Cost:
         for o_uav in uavs:
             if uav is o_uav: continue
             if np.linalg.norm(uav.xy-o_uav.xy) <= self.R1_lim:
-                return 0
+                return 1
         return 0
 
 
-class MMPIO:
+class MPIO:
 
-    def __init__(self):
-        self.N = 58
-        self.Nc_max_3 = 20
+    def __init__(self,dimension = 5):
+
+
+        self.n = None
+        self.X = None
+        self.V = None
+        
+        self.dimention = dimension
+        self.Xl = 0
+        self.Xu = 1
+        self.Vl = -0.05
+        self.Vu = 0.05
+        self.Nc3_max = 20
+        self.pl = 0.9
         self.Nd = 2
-        self.Xu= 1
-        self.Xl= 0
-        self.Vu= 0.05
-        self.Vl= -0.05
         self.R = 0.3
         self.ft = 3
-        self.pl = 0.9
-        self.e = 2
-        self.sl = 20
-    
-    def run(self,objectives_func, dimension):
-        positions = np.random.uniform(self.Xl, self.Xu, (self.N, dimension))
-        velocities = np.random.uniform(self.Vl, self.Vu, (self.N, dimension))
+        self.sl = 2
+        self.e = 0.01
+        self.archive = []
+        self.time = {}
+        self.time2 = {}
+
+    def optimize(self, wi ,of, num_pigeons = 58):
+
+        self.n = num_pigeons 
+        self.X = np.random.uniform(0,1, (self.n, self.dimention))
+        self.V = np.random.uniform(-0.05, 0.05, (self.n, self.dimention))
         Nc = 1
+        self.archive = []
 
-        archive = []
-
-        current_n = self.N
-
-        while Nc <= self.Nc_max_3:
-            objectives = [objectives_func(position) for position in positions]
-            
-            indexs, ranks, crowding_distences = NSGA2Sorter.nsga2_sort(objectives)
+        # step 5
+        while Nc <= self.Nc3_max:
+            # cou = time.time()
+            objectives = [of(x) for x in self.X]
+            # self.time["obj1"] = time.time()-cou + self.time.get("obj1",0);self.time2["obj1"] = time.time()-cou;cou=time.time()
+            ranks = NSGA2Sorter.pareto_sort(objectives)
+            # self.time["srt1"] = time.time()-cou + self.time.get("srt1",0);self.time2["srt1"] = time.time()-cou;cou=time.time()
             fronts_idx = [i for i in range(len(ranks)) if ranks[i] == 1]
+            Xcenter = self.X[fronts_idx].mean(axis=0)
+            # self.time["Xcnt"] = time.time()-cou + self.time.get("Xcnt",0);self.time2["Xcnt"] = time.time()-cou;cou=time.time()
 
-            Xcenter = positions[fronts_idx].mean(axis=0)
 
-            archive.extend([positions[i] for i in fronts_idx])
-            if archive:
-                archive_objectives = [objectives_func(pos) for pos in archive]
-                archive_ranks = self._pareto_sorting(archive_objectives)
-                archive = [pos for pos, rank in zip(archive, archive_ranks) if rank == 1]
+            cou = time.time()
+            self.archive.extend([self.X[i] for i in fronts_idx])
+            self.time["extnd"] = time.time()-cou + self.time.get("extnd",0);self.time2["extnd"] = time.time()-cou;cou=time.time()
+            if self.archive:
+                archive_objectives = [of(pos) for pos in self.archive]
+                self.time["recrt"] = time.time()-cou + self.time.get("recrt",0);self.time2["recrt"] = time.time()-cou;cou=time.time()
+                archive_ranks = NSGA2Sorter.pareto_sort(archive_objectives)
+                self.time["sort"] = time.time()-cou + self.time.get("sort",0);self.time2["sort"] = time.time()-cou;cou=time.time()
+                self.archive = [pos for pos, rank in zip(self.archive, archive_ranks) if rank == 1]
+            self.time["achv"] = time.time()-cou + self.time.get("achv",0);self.time2["achv"] = len(self.archive);cou=time.time()
 
-            Xg = np.random.choice(archive)
-            
+            Xg = self.archive[np.random.randint(len(self.archive))]
+            # self.time["Xg"] = time.time()-cou + self.time.get("Xg",0);self.time2["Xg"] = time.time()-cou;cou=time.time()
             Nc+=1
-            new_positions = np.copy(positions)
-            new_velocities = np.copy(velocities)
-            
-            i = 1
-            while i <= current_n:
 
-                if ranks[indexs.index(i)] <= np.ceil(self.pl*current_n):
-                    dummy_log = np.log(Nc)/np.log(self.Nc_max_3)
-                    new_velocities[i] = np.exp(-self.R*Nc)*velocities[i]+np.random.random()*self.ft*(1-dummy_log)*(Xg-positions[i]) + np.random.random()*self.ft*dummy_log*(Xcenter-positions[i])
-                    new_positions[i] = positions[i] + np.clip(new_velocities[i],self.Vl,self.Vu)
+            # step 6
+            i = 1
+            nX = self.X.copy()
+            nV = self.V.copy()
+            # self.time["copy"] = time.time()-cou + self.time.get("copy",0);self.time2["copy"] = time.time()-cou;cou=time.time()
+
+            # step7
+            while i <= self.n:
+                if ranks[i-1] <= np.ceil(self.pl*self.n):
+
+                    dummy_log = np.log(Nc)/np.log(self.Nc3_max)
+                    nV[i-1] = np.exp(-self.R*Nc)*self.V[i-1]+np.random.random()*self.ft*(1-dummy_log)*(Xg-self.X[i-1]) + np.random.random()*self.ft*dummy_log*(Xcenter-self.X[i-1])
+                    nX[i-1] = self.X[i-1] + np.clip(nV[i-1],self.Vl,self.Vu)
+
                 else:
                     k = 1
                     while k <= self.sl:
-                        valid_pigeons = [j for j in range(current_n) if ranks[j] < ranks[i]]
+                        valid_pigeons = [j for j in range(self.n) if ranks[j] < ranks[i-1]]
                         if valid_pigeons:
-                            dim = np.ceil(np.random.random()*dimension)
-                            new_positions[i][dim] = np.clip(positions[np.random.choice(valid_pigeons)][dim]+ self.e*np.random.random(),self.Xl,self.Xu)
+                            dim = int(np.random.random()*self.dimention)
+                            nX[i-1][dim] = np.clip(self.X[np.random.choice(valid_pigeons)][dim]+ self.e*np.random.random(),self.Xl,self.Xu)
                         k+=1
                 
-                new_objective = objectives_func(new_positions[i])
+                new_objective = of(nX[i-1])
+                if NSGA2Sorter.dominates(objectives[i-1],new_objective):
+                    nX[i-1] = self.X[i-1]
+                    new_objective = objectives[i-1]
+                
+                self.X = nX.copy()
+                self.V = nV.copy()
+                objectives[i-1] = new_objective
+            
+                # step 8
+                i += 1
+            # self.time["lern"] = time.time()-cou + self.time.get("lern",0);self.time2["lern"] = time.time()-cou;cou=time.time()
 
-                if NSGA2Sorter._dominates(objectives[i],new_objective):
-                    new_positions[i] = positions[i]
-                i+=1
-
-            positions = new_positions
-            velocities = new_velocities
-            
-            if Nc <= self.Nc_max_3:
-                to_remove = sorted(range(current_n), key=lambda x: ranks[x], reverse=True)[:min(self.Nd, current_n)]
-                to_remove = to_remove[:min(self.Nd, current_pop_size - 1)]
-                positions = np.delete(positions, to_remove, axis=0)
-                velocities = np.delete(velocities, to_remove, axis=0)
-                current_pop_size -= len(to_remove)
-            
-            # Return Pareto front
-        if len(positions) == 0:
-            return np.random.rand(dimension), []
-            
-        final_objectives = []
-        for i in range(len(positions)):
-            try:
-                obj = objectives_func(positions[i])
-                final_objectives.append(obj)
-            except Exception:
-                final_objectives.append([1000.0, 1000.0])
+            if Nc <= self.Nc3_max and self.n > self.Nd:
+                to_remove = sorted(range(self.n), key=lambda x: ranks[x], reverse=True)[:min(self.Nd, self.n)]
+                self.X = np.delete(self.X, to_remove, axis=0)
+                self.V = np.delete(self.V, to_remove, axis=0)
+                self.n -= len(to_remove)
+            # self.time["rmv"] = time.time()-cou + self.time.get("rmv",0);self.time2["rmv"] = time.time()-cou;cou=time.time()
         
-        final_ranks = self._pareto_sorting(final_objectives)
-        pareto_front = [positions[i] for i, rank in enumerate(final_ranks) if rank == 1]
-
-
-
-        if pareto_front:
-            # Select solution with minimum Cost2 (Equation 24)
-            best_idx = 0
-            min_cost2 = float('inf')
-            for i, pos in enumerate(pareto_front):
-                try:
-                    obj = objectives_func(pos)
-                    if len(obj) > 1 and obj[1] < min_cost2:
-                        min_cost2 = obj[1]
-                        best_idx = i
-                except Exception:
-                    continue
-            return pareto_front[best_idx], final_objectives
-        else:
-            return positions[0], final_objectives
-
-
-
-class DataClass: pass
-
-
+        final_objectives = [of(x) for x in self.X[:self.n]]
+        front_objs = [final_objectives[loop] for loop,rank in enumerate(NSGA2Sorter.pareto_sort(final_objectives)) if rank == 1]
+        if front_objs:
+            self.min_idx = np.argmin(list(map(lambda x: x[1],front_objs)))
+            if NSGA2Sorter.dominates(front_objs[self.min_idx], of(wi)):
+                return self.X[self.min_idx].tolist()
+        # self.time["lst"] = time.time()-cou + self.time.get("lst",0);self.time2["lst"] = time.time()-cou;cou=time.time()
+        return wi
 
 class FlockingControlAlgorithm:
 
@@ -639,7 +550,7 @@ class FlockingControlAlgorithm:
         self.flocking_model = FlockingModel()
         self.obstacle_avoidance_model = ObstacleAvoidanceModel()
         self.performance_critetia = Cost(self.flocking_model.R_desire,self.flocking_model.Rlim_1,self.obstacle_avoidance_model.R2_lim)
-        self.mmpio = MMPIO()
+        self.optimizer = MPIO()
 
         self.ve = np.array([10.0,0.0,0.0])
         # self.ve = np.array([0.0,10.0,0.0])
@@ -654,7 +565,7 @@ class FlockingControlAlgorithm:
         self.Vxy_c_lim = 0.25
         self.psi_c_lim = 0.1
 
-        self.enable_render = True
+        self.enable_render = False
         if self.enable_render:
             plt.ion()
             self.fig, self.ax = plt.subplots(figsize=(12, 8))
@@ -700,7 +611,7 @@ class FlockingControlAlgorithm:
                      for i in range(self.num_pigeons)}
         cost_history = {'cost1': [], 'cost2': [], 'cost3': [], 'cost4': []}
         for t in np.arange(0,self.Tmax,self.dt):
-            print()
+            print("time:",t)
             self.TT = t
             vf_dots = [] # Store flocking forces for rendering
             vos = [] # Store obstacle avoidance forces for rendering
@@ -717,6 +628,7 @@ class FlockingControlAlgorithm:
                 def objective_func(wi):
                     dummy_uavs = self.uavs.copy()
                     for i in [x for x in range(len(self.w)) if idx != x]+[idx]:
+                    # for i in [idx]:
                         vo = self.obstacle_avoidance_model.calculate_force(self.uavs[i],self.obstacles,self.ve,self.w[i][i] if i != idx else wi[idx])
                         vf_dot = self.flocking_model.calculate_acc(self.uavs[i],self.uavs,self.w[i] if i != idx else wi,self.ve,self.he,self.obstacle_avoidance_model)
 
@@ -738,7 +650,6 @@ class FlockingControlAlgorithm:
                         new_uav_of = self.uav_model.update_state(uav,{"Vxy_c":Vxy_c,"psi_c":psi_c,"h_c":h_c},self.dt)
                         dummy_uavs[i] = new_uav_of
 
-
                     cost1 = self.performance_critetia.cost1(new_uav_of,self.ve,self.obstacle_avoidance_model.get_A0(uav,self.obstacles,self.ve)[0])
                     cost2 = self.performance_critetia.cost2(new_uav_of,dummy_uavs)
                     cost3 = self.performance_critetia.cost3(new_uav_of,self.obstacles)
@@ -746,94 +657,9 @@ class FlockingControlAlgorithm:
 
                     return [cost1,cost2] if cost3+cost4 == 0 else [2000.0,2000.0]
                 
-                mpio = DataClass()
-                mpio.dimention = len(self.w[0])
-                mpio.n = self.num_pigeons 
-                mpio.X = np.random.uniform(0,1, (mpio.n, mpio.dimention))
-                mpio.V = np.random.uniform(-0.05, 0.05, (mpio.n, mpio.dimention))
-                mpio.Nc = 1
-                
-                mpio.Xl,mpio.Xu = 0,1
-                mpio.Vl,mpio.Vu = -0.05,0.05
-                mpio.Nc3_max = 20
-                mpio.pl = 0.9
-                mpio.Nd = 2
-                mpio.R = 0.3
-                mpio.ft = 3
-                mpio.sl = 2
-                mpio.e = 0.01
-                mpio.of = objective_func
-                mpio.archive = []
-
-
-                # step 5
-                while mpio.Nc <= mpio.Nc3_max:
-                    # print("Nc",mpio.Nc)
-                    mpio.objectives = [mpio.of(wi) for wi in mpio.X]
-                    mpio.ranks = NSGA2Sorter.nsga2_sort(mpio.objectives)
-
-                    mpio.fronts_idx = [i for i in range(len(mpio.ranks)) if mpio.ranks[i] == 1]
-
-                    mpio.Xcenter = mpio.X[mpio.fronts_idx].mean(axis=0)
-
-                    mpio.archive.extend([mpio.X[i] for i in mpio.fronts_idx])
-                    if mpio.archive:
-                        archive_objectives = [mpio.of(pos) for pos in mpio.archive]
-                        archive_ranks = NSGA2Sorter._pareto_sorting(archive_objectives)
-                        mpio.archive = [pos for pos, rank in zip(mpio.archive, archive_ranks) if rank == 1]
-
-                    mpio.Xg = mpio.archive[np.random.randint(len(mpio.archive))]
-                    mpio.Nc+=1
-
-                    # step 6
-                    mpio.i = 1
-                    mpio.nX = mpio.X.copy()
-                    mpio.nV = mpio.V.copy()
-                    # step7
-                    while mpio.i <= mpio.n:
-                        if mpio.ranks[mpio.i-1] < int(np.ceil(mpio.pl*mpio.n)):
-
-                            dummy_log = np.log(mpio.Nc)/np.log(mpio.Nc3_max)
-                            mpio.nV[mpio.i-1] = np.exp(-mpio.R*mpio.Nc)*mpio.V[mpio.i-1]+np.random.random()*mpio.ft*(1-dummy_log)*(mpio.Xg-mpio.X[mpio.i-1]) + np.random.random()*mpio.ft*dummy_log*(mpio.Xcenter-mpio.X[mpio.i-1])
-                            mpio.nX[mpio.i-1] = mpio.X[mpio.i-1] + np.clip(mpio.nV[mpio.i-1],mpio.Vl,mpio.Vu)
-
-                        else:
-                            k = 1
-                            while k <= mpio.sl:
-                                valid_pigeons = [j for j in range(mpio.n) if mpio.ranks[j] < mpio.ranks[mpio.i-1]]
-                                if valid_pigeons:
-                                    dim = int(np.random.random()*mpio.dimention)
-                                    mpio.nX[mpio.i-1][dim] = np.clip(mpio.X[np.random.choice(valid_pigeons)][dim]+ mpio.e*np.random.random(),mpio.Xl,mpio.Xu)
-                                k+=1
-                        
-                        mpio.new_objective = mpio.of(mpio.nX[mpio.i-1])
-                        if NSGA2Sorter._dominates(mpio.objectives[mpio.i-1],mpio.new_objective):
-                            mpio.nX[mpio.i-1] = mpio.X[mpio.i-1]
-                            mpio.new_objective = mpio.objectives[mpio.i-1]
-                        
-                        mpio.X = mpio.nX.copy()
-                        mpio.V = mpio.nV.copy()
-                        mpio.objectives[mpio.i-1] = mpio.new_objective
-                    
-                        # step 8
-                        mpio.i += 1
-
-                    if mpio.Nc <= mpio.Nc3_max and mpio.n > mpio.Nd:
-                        to_remove = sorted(range(mpio.n), key=lambda x: mpio.ranks[x], reverse=True)[:min(mpio.Nd, mpio.n)]
-                        mpio.X = np.delete(mpio.X, to_remove, axis=0)
-                        mpio.V = np.delete(mpio.V, to_remove, axis=0)
-                        mpio.n -= len(to_remove)
-                
-                mpio.final_objectives = [mpio.of(x) for x in mpio.X[:mpio.n]]
-                cost2_values = [obj[1] for obj in mpio.final_objectives]
-                tmp = np.argmin(cost2_values)
-                if NSGA2Sorter._dominates(mpio.final_objectives[tmp], mpio.of(self.w[idx])):
-                    self.w[idx]  = mpio.X[tmp].tolist()
-
-                
-
-                
-
+                self.w[idx] = self.optimizer.optimize(self.w[idx],objective_func,15)
+                print("\n".join(list(map(lambda k: f"{k}\t{self.optimizer.time[k]:.3f}\t{self.optimizer.time2[k]:.3f}", self.optimizer.time))))
+                print()
                 u = np.zeros(vf_dot.shape)
                 u[:2] = vf_dot[:2] + (vo[:2]-uav.vec_Vxy)
                 u[2] = vf_dot[2]
